@@ -1,0 +1,218 @@
+1D HEAT EQUATION:-
+% Parameters
+L = 1.0;                 % Length of the domain
+alpha = 0.01;            % Thermal diffusivity
+numElements = 10;        % Number of elements
+dt = 0.01;               % Time step size
+numTimeSteps = 100;      % Number of time steps
+
+% Create mesh
+mesh = createMesh1D(L, numElements);
+
+% Initial condition
+u0 = sin(pi * mesh.nodalCoordinates)';
+
+% Assemble matrices
+[K, M] = assemble1DHeatEquation(mesh, alpha);
+
+% Solve the heat equation
+u = solve1DHeatEquation(mesh, K, M, u0, dt, numTimeSteps);
+
+% Plot the solution
+figure;
+plot(mesh.nodalCoordinates, u, 'o-');
+xlabel('Position');
+ylabel('Temperature');
+title('Temperature Distribution (FEM)');
+ 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function mesh = createMesh1D(L, numElements)
+    mesh.numNodes = numElements + 1;
+    mesh.nodalCoordinates = linspace(0, L, mesh.numNodes);
+    mesh.elementConnectivity = [(1:numElements)', (2:numElements+1)'];
+end
+
+function [K, M] = assemble1DHeatEquation(mesh, alpha)
+    numNodes = mesh.numNodes;
+    K = zeros(numNodes, numNodes);
+    M = zeros(numNodes, numNodes);
+
+    for e = 1:size(mesh.elementConnectivity, 1)
+        nodes = mesh.elementConnectivity(e, :);
+        x1 = mesh.nodalCoordinates(nodes(1));
+        x2 = mesh.nodalCoordinates(nodes(2));
+        le = x2 - x1;  % Element length
+
+        ke = alpha / le * [1, -1; -1, 1];
+        me = le / 6 * [2, 1; 1, 2];
+
+        K(nodes, nodes) = K(nodes, nodes) + ke;
+        M(nodes, nodes) = M(nodes, nodes) + me;
+    end
+
+    % Apply boundary conditions (Dirichlet)
+    K(1, :) = 0; K(1, 1) = 1;
+    K(numNodes, :) = 0; K(numNodes, numNodes) = 1;
+    M(1, :) = 0; M(1, 1) = 1;
+    M(numNodes, :) = 0; M(numNodes, numNodes) = 1;
+end
+
+function u = solve1DHeatEquation(mesh, K, M, u0, dt, numTimeSteps)
+    numNodes = mesh.numNodes;
+    u = u0;
+
+    A = M + dt * K;
+
+    for n = 1:numTimeSteps
+        b = M * u;
+        u = A \ b;
+    end
+end
+
+% 2D HEAT EQUATION:-
+% Parameters
+Lx = 1.0;               % Length of the domain in x-direction
+Ly = 1.0;               % Length of the domain in y-direction
+alpha = 0.01;           % Thermal diffusivity
+nx = 20;                % Number of spatial discretization points in x
+ny = 20;                % Number of spatial discretization points in y
+dx = Lx / (nx - 1);     % Spatial step size in x
+dy = Ly / (ny - 1);     % Spatial step size in y
+dt = 0.001;             % Time step size
+numTimeSteps = 100;     % Number of time steps
+
+% Create mesh
+x = linspace(0, Lx, nx);
+y = linspace(0, Ly, ny);
+[X, Y] = meshgrid(x, y);
+
+% Initial condition
+u0 = @(x, y) sin(pi * x) .* sin(pi * y);
+U = u0(X, Y);
+
+% Boundary condition (Dirichlet)
+U(:, 1) = 0;      % Left boundary
+U(:, end) = 0;    % Right boundary
+U(1, :) = 0;      % Bottom boundary
+U(end, :) = 0;    % Top boundary
+
+% Initialize matrices
+K = sparse(nx * ny, nx * ny);
+M = sparse(nx * ny, nx * ny);
+
+% Shape functions and their gradients
+phi = @(xi, eta) [(1 - xi) * (1 - eta), xi * (1 - eta), xi * eta, (1 - xi) * eta];
+dphi_dxi = @(xi, eta) [-1 + eta, 1 - eta, eta, -eta];
+dphi_deta = @(xi, eta) [-1 + xi, -xi, xi, 1 - xi];
+
+% Loop over elements
+for i = 1:nx - 1
+    for j = 1:ny - 1
+        % Node indices of the current element
+        nodes = [(i - 1) * ny + j, i * ny + j, i * ny + (j + 1), (i - 1) * ny + (j + 1)];
+
+        % Local stiffness and mass matrices
+        K_local = zeros(4, 4);
+        M_local = zeros(4, 4);
+
+        % Loop over Gauss points for numerical integration
+        gauss_points = [1/sqrt(3), -1/sqrt(3)];
+        for gp1 = gauss_points
+            for gp2 = gauss_points
+                % Shape function gradients
+                dphi_dx = dphi_dxi(gp1, gp2) / dx;
+                dphi_dy = dphi_deta(gp1, gp2) / dy;
+
+                % Jacobian determinant
+                J = dx * dy / 4;
+
+                % Local stiffness matrix
+                K_local = K_local + (dphi_dx' * dphi_dx + dphi_dy' * dphi_dy) * alpha * J;
+
+                % Local mass matrix
+                phi_val = phi(gp1, gp2);
+                M_local = M_local + (phi_val' * phi_val) * J;
+            end
+        end
+
+        % Assemble global matrices
+        for m = 1:4
+            for n = 1:4
+                K(nodes(m), nodes(n)) = K(nodes(m), nodes(n)) + K_local(m, n);
+                M(nodes(m), nodes(n)) = M(nodes(m), nodes(n)) + M_local(m, n);
+            end
+        end
+    end
+end
+
+
+% Flatten initial condition
+U_flat = U(:);
+
+% Time stepping
+for t = 1:numTimeSteps
+    % Solve the linear system (M + dt * K) * U_new = M * U_old
+    U_flat = (M + dt * K) \ (M * U_flat);
+
+    % Reshape the solution back to 2D
+    U = reshape(U_flat, [ny, nx]);
+
+    % Apply boundary conditions
+    U(:, 1) = 0;
+    U(:, end) = 0;
+    U(1, :) = 0;
+    U(end, :) = 0;
+end
+
+% Plot the final solution
+surf(X, Y, U);
+xlabel('x');
+ylabel('y');
+zlabel('Temperature');
+title('2D Heat Equation Solution');
+ 
+
+% 3D HEAT EQUATION:-
+% Define the geometry using a built-in example geometry, e.g., a cube
+model = createpde('thermal', 'transient');
+
+% Create a cube geometry
+gm = multicuboid(1, 1, 1);
+model.Geometry = gm;
+
+% Generate a mesh
+generateMesh(model, 'Hmax', 0.1);
+
+% Specify thermal properties
+thermalProperties(model, 'ThermalConductivity', 1, 'MassDensity', 1, 'SpecificHeat', 1);
+
+% Initial conditions
+thermalIC(model, 0);  % Initial temperature set to 0 everywhere
+
+% Define boundary conditions
+% For simplicity, assume all faces are insulated (Neumann boundary condition with zero flux)
+thermalBC(model, 'Face', 1:model.Geometry.NumFaces, 'HeatFlux', 0);
+
+% Apply a heat source on one face for demonstration
+thermalBC(model, 'Face', 1, 'Temperature', 100);
+
+% Specify the time range for the solution
+tlist = linspace(0, 10, 100);
+
+% Solve the PDE
+result = solve(model, tlist);
+
+% Get the temperature at the final time step
+T = result.Temperature(:, end);
+
+% Visualize the results
+figure
+pdeplot3D(model, 'ColorMapData', T)
+title('Temperature Distribution at Final Time Step')
+xlabel('X')
+ylabel('Y')
+zlabel('Z')
+colorbar
+ 
+
